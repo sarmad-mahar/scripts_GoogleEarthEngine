@@ -1,0 +1,82 @@
+// script: Dynamic World classification extraction and export
+// after you paste this script in google earth engine, add a shapefile and set your desired date. Then run it.
+// for any query; contact at sarmadmaharofficial@gmail.com
+// ---- Youtube: https://www.youtube.com/@sarmad-mahar ----
+
+// AOI
+var aoi = table;
+
+// date range
+var START = ee.Date('2021-04-02');
+var END = START.advance(2, 'day');
+
+// load Dynamic World
+var dwCol = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+  .filterBounds(aoi)
+  .filterDate(START, END)
+  .sort('system:time_start');
+
+// image count
+var count = dwCol.size();
+print('DW images found:', count);
+
+// select image (mode if multiple, first if single)
+var rawSelected = ee.Algorithms.If(
+  count.gt(1),
+  dwCol.reduce(ee.Reducer.mode()),
+  dwCol.first()
+);
+var dwImgRaw = ee.Image(rawSelected);
+
+// ensure label band
+var labelImage = ee.Image(
+  ee.Algorithms.If(
+    dwImgRaw.bandNames().contains('label'),
+    dwImgRaw.select('label'),
+    dwImgRaw.select('label_mode').rename('label')
+  )
+);
+
+// color palette
+var VIS_PALETTE = [
+  '419bdf','397d49','88b053','7a87c6','e49635',
+  'dfc35a','c4281b','a59b8f','b39fe1'
+];
+
+// map view
+Map.centerObject(aoi, 12);
+Map.addLayer(labelImage, {min:0, max:8, palette:VIS_PALETTE}, 'DW label (original)');
+
+// clipped label
+var clippedLabel = labelImage.clip(aoi);
+Map.addLayer(clippedLabel, {min:0, max:8, palette:VIS_PALETTE}, 'DW label (clipped)');
+
+// prep export image
+var labelForExport = clippedLabel.toUint8().rename('label')
+  .reproject(ee.Projection('EPSG:4326').atScale(10));
+
+// export GeoTIFF
+Export.image.toDrive({
+  image: labelForExport,
+  description: 'DW_LabelRaw_Clipped_' + START.format('YYYY_MM_dd').getInfo(),
+  folder: 'EarthEngine_Exports',
+  fileNamePrefix: 'DW_LabelRaw_Clipped_' + START.format('YYYY_MM_dd').getInfo(),
+  region: aoi,
+  scale: 10,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13,
+  fileFormat: 'GeoTIFF'
+});
+
+/*
+DW class ID → hex palette (for ArcGIS)
+0 water #419bdf
+1 trees #397d49
+2 grass #88b053
+3 flooded_vegetation #7a87c6
+4 crops #e49635
+5 shrub_and_scrub #dfc35a
+6 built #c4281b
+7 bare #a59b8f
+8 snow_and_ice #b39fe1
+*/
